@@ -5,6 +5,7 @@ const path = require('path');
 async function runPlaywright(data) {
   console.log('[runPlaywright] Raw input:', data);
 
+  // Safely unpack and normalize the input
   const {
     address: rawAddress,
     city: rawCity,
@@ -13,7 +14,6 @@ async function runPlaywright(data) {
     amount: rawAmount,
   } = data || {};
 
-  // Normalize to trimmed strings
   const address = (rawAddress ?? '').toString().trim();
   const city    = (rawCity ?? '').toString().trim();
   const state   = (rawState ?? '').toString().trim();
@@ -28,6 +28,7 @@ async function runPlaywright(data) {
     amount,
   });
 
+  // Validate required fields
   const missing = [];
   if (!address) missing.push('address');
   if (!city)    missing.push('city');
@@ -41,11 +42,13 @@ async function runPlaywright(data) {
     );
   }
 
+  // Prepare downloads directory
   const downloadsDir = path.resolve(__dirname, 'downloads');
   if (!fs.existsSync(downloadsDir)) {
     fs.mkdirSync(downloadsDir, { recursive: true });
   }
 
+  // Credentials from env vars
   const email = process.env.FLIPPING_EMAIL;
   const password = process.env.FLIPPING_PASSWORD;
 
@@ -53,60 +56,91 @@ async function runPlaywright(data) {
     throw new Error('Missing FLIPPING_EMAIL or FLIPPING_PASSWORD env vars');
   }
 
-  const browser = await chromium.launch({ headless: true });
+  // For local debugging, you can temporarily switch to headless: false and add slowMo
+  const browser = await chromium.launch({
+    headless: true, // change to false for local visual debugging
+    // slowMo: 500, // uncomment for slower steps when debugging locally
+  });
+
   const context = await browser.newContext({
     acceptDownloads: true,
   });
   const page = await context.newPage();
-  page.setDefaultTimeout(60000);
+  page.setDefaultTimeout(60000); // 60s per action max
 
   try {
+    // 1. Login
     console.log('[runPlaywright] Navigating to login page...');
     await page.goto('https://membersflippingmastery.com/', {
       waitUntil: 'domcontentloaded',
     });
 
-    await page.getByRole('textbox', { name: 'Email Address' }).fill(email);
-    await page.getByRole('textbox', { name: 'Password' }).fill(password);
-    await page.getByRole('button', { name: 'SIGN IN' }).click();
+    console.log('[runPlaywright] Filling login form...');
+    await page.getByRole('textbox', { name: /email address/i }).fill(email);
+    await page.getByRole('textbox', { name: /password/i }).fill(password);
+    await page.getByRole('button', { name: /sign in/i }).click();
     await page.waitForLoadState('networkidle');
 
+    // 2. Navigate to $10K Club
     console.log('[runPlaywright] Navigating to $10K Club...');
-    await page.getByRole('link', { name: ' $10K Club' }).click();
+    try {
+      await page.getByRole('link', { name: /10k club/i }).click();
+    } catch (err) {
+      console.log('[runPlaywright] getByRole 10K Club failed, trying getByText...');
+      await page.getByText('10K Club', { exact: false }).click();
+    }
     await page.waitForLoadState('networkidle');
 
+    // 3. Navigate to Softwares
     console.log('[runPlaywright] Navigating to Softwares...');
-    await page.getByRole('link', { name: ' Softwares' }).click();
+    try {
+      await page.getByRole('link', { name: /softwares/i }).click();
+    } catch (err) {
+      console.log('[runPlaywright] getByRole Softwares failed, trying getByText...');
+      await page.getByText('Softwares', { exact: false }).click();
+    }
     await page.waitForLoadState('networkidle');
 
-    console.log('[runPlaywright] Opening letter tool...');
+    // 4. Open the letter tool (this locator is based on your original script)
+    console.log('[runPlaywright] Opening letter tool panel button...');
     await page.locator('div:nth-child(5) > .panel > .panel-body > .btn').click();
 
+    // Try closing any modal that might pop up
     try {
-      await page.getByRole('button', { name: 'Close' }).click();
+      console.log('[runPlaywright] Trying to close intro modal (if present)...');
+      await page.getByRole('button', { name: /close/i }).click();
     } catch {
       console.log('[runPlaywright] No Close modal found, continuing');
     }
 
+    // 5. Click "Add New Letter"
     console.log('[runPlaywright] Clicking "Add New Letter"...');
-    await page.getByRole('link', { name: 'Add New Letter' }).click();
+    try {
+      await page.getByRole('link', { name: /add new letter/i }).click();
+    } catch (err) {
+      console.log('[runPlaywright] getByRole Add New Letter failed, trying getByText...');
+      await page.getByText('Add New Letter', { exact: false }).click();
+    }
     await page.waitForLoadState('networkidle');
 
+    // 6. Fill form with dynamic data
     console.log('[runPlaywright] Filling form with dynamic data...');
 
-    await page.getByRole('textbox', { name: 'Address' }).fill(address);
-    await page.getByRole('textbox', { name: 'City' }).fill(city);
-    await page.getByRole('textbox', { name: 'State' }).fill(state);
-    await page.getByRole('textbox', { name: 'Zip' }).fill(zip);
-    await page.getByRole('textbox', { name: 'Amount' }).fill(amount);
+    await page.getByRole('textbox', { name: /address/i }).fill(address);
+    await page.getByRole('textbox', { name: /city/i }).fill(city);
+    await page.getByRole('textbox', { name: /state/i }).fill(state);
+    await page.getByRole('textbox', { name: /zip/i }).fill(zip);
+    await page.getByRole('textbox', { name: /amount/i }).fill(amount);
 
-    await page.getByRole('button', { name: 'Save' }).first().click();
+    console.log('[runPlaywright] Saving letter...');
+    await page.getByRole('button', { name: /save/i }).first().click();
     await page.waitForLoadState('networkidle');
 
+    // 7. Trigger and wait for the PDF download
     console.log('[runPlaywright] Triggering download...');
     const [download] = await Promise.all([
       context.waitForEvent('download'),
-      page.getByRole('link', { name: 'Download' }).click(),
+      page.getByRole('link', { name: /download/i }).click(),
     ]);
 
     const filePath = path.join(
