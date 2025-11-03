@@ -1,30 +1,51 @@
 const express = require('express');
-const { runPlaywright } = require('./generatePDF');
 const fs = require('fs');
+const path = require('path');
+const { runPlaywright } = require('./generatePDF');
 
 const app = express();
-app.use(express.json());
 
+// Parse JSON bodies, allow a bit of size for safety
+app.use(express.json({ limit: '10mb' }));
+
+// Simple health check so visiting "/" in the browser works
+app.get('/', (req, res) => {
+  res.json({
+    ok: true,
+    message: 'Playwright proof-of-funds bot is running',
+    endpoints: ['/run-playwright (POST)'],
+  });
+});
+
+// Main endpoint – n8n (or anything else) will call this
 app.post('/run-playwright', async (req, res) => {
-  const { address } = req.body;
-
-  if (!address) return res.status(400).json({ error: 'Missing address' });
-
   try {
-    const filePath = await runPlaywright(address);
-    const file = fs.readFileSync(filePath);
-    const base64 = file.toString('base64');
+    const address = (req.body?.address || '').trim();
 
-    res.status(200).json({
-      filename: filePath.split('/').pop(),
+    if (!address) {
+      return res.status(400).json({ error: 'Missing address' });
+    }
+
+    console.log('[/run-playwright] Received address:', address);
+
+    const filePath = await runPlaywright(address);
+    console.log('[/run-playwright] PDF saved at:', filePath);
+
+    const fileBuffer = fs.readFileSync(filePath);
+    const base64 = fileBuffer.toString('base64');
+
+    return res.status(200).json({
+      filename: path.basename(filePath),
       base64,
     });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Playwright automation failed' });
+  } catch (err) {
+    console.error('[/run-playwright] Error:', err);
+    return res.status(500).json({ error: 'Playwright automation failed' });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
+// Use the PORT Railway gives us (it was 8080 in your logs), default for local dev
+const PORT = Number(process.env.PORT) || 8080;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
