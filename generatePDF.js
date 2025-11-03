@@ -58,9 +58,9 @@ async function runPlaywright(data) {
 
   // For local debugging, you can temporarily switch to headless: false and add slowMo
   const browser = await chromium.launch({
-    headless: true, // change to false for local visual debugging
-    // slowMo: 500, // uncomment for slower steps when debugging locally
+    headless: true,
   });
+  
 
   const context = await browser.newContext({
     acceptDownloads: true,
@@ -136,20 +136,37 @@ async function runPlaywright(data) {
     await page.getByRole('button', { name: /save/i }).first().click();
     await page.waitForLoadState('networkidle');
 
-    // 7. Trigger and wait for the PDF download
-    console.log('[runPlaywright] Triggering download...');
-    const [download] = await Promise.all([
-      context.waitForEvent('download'),
-      page.getByRole('link', { name: /download/i }).click(),
-    ]);
+  // 7. Trigger and wait for the PDF download (handle popup + download)
+  console.log('[runPlaywright] Triggering download...');
 
-    const filePath = path.join(
-      downloadsDir,
-      `proof-of-funds-${Date.now()}.pdf`,
-    );
+  const popupPromise = page.waitForEvent('popup');
+  const downloadPromise = page.waitForEvent('download');
 
-    await download.saveAs(filePath);
-    console.log('[runPlaywright] Download saved to:', filePath);
+  await page.getByRole('link', { name: /download/i }).click();
+
+  let popup;
+  try {
+    popup = await popupPromise;
+    console.log('[runPlaywright] Download popup opened');
+  } catch {
+    console.log('[runPlaywright] No popup detected (might be inline download)');
+  }
+
+  const download = await downloadPromise;
+
+  const filePath = path.join(
+    downloadsDir,
+    `proof-of-funds-${Date.now()}.pdf`,
+  );
+
+  await download.saveAs(filePath);
+  console.log('[runPlaywright] Download saved to:', filePath);
+
+  if (popup) {
+    await popup.close();
+    console.log('[runPlaywright] Download popup closed');
+  }
+
 
     await browser.close();
     return filePath;
