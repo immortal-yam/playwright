@@ -5,30 +5,51 @@ const { runPlaywright } = require('./generatePDF');
 
 const app = express();
 
-// Parse JSON bodies, allow a bit of size for safety
+// Parse JSON bodies
 app.use(express.json({ limit: '10mb' }));
 
-// Simple health check so visiting "/" in the browser works
+// Health check
 app.get('/', (req, res) => {
   res.json({
     ok: true,
     message: 'Playwright proof-of-funds bot is running',
-    endpoints: ['/run-playwright (POST)'],
+    endpoint: '/run-playwright (POST)',
+    expectedBody: ['address', 'city', 'state', 'zip', 'amount'],
   });
 });
 
-// Main endpoint – n8n (or anything else) will call this
 app.post('/run-playwright', async (req, res) => {
   try {
-    const address = (req.body?.address || '').trim();
+    console.log('[/run-playwright] Raw body:', req.body);
 
-    if (!address) {
-      return res.status(400).json({ error: 'Missing address' });
+    const body = req.body || {};
+
+    let address = (body.address ?? '').toString().trim();
+    let city    = (body.city ?? '').toString().trim();
+    let state   = (body.state ?? '').toString().trim();
+    let zip     = (body.zip ?? '').toString().trim();
+    let amount  = (body.amount ?? '').toString().trim();
+
+    const letterData = { address, city, state, zip, amount };
+
+    console.log('[/run-playwright] Normalized data:', letterData);
+
+    const missing = [];
+    if (!address) missing.push('address');
+    if (!city)    missing.push('city');
+    if (!state)   missing.push('state');
+    if (!zip)     missing.push('zip');
+    if (!amount)  missing.push('amount');
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        missing,
+        received: letterData,
+      });
     }
 
-    console.log('[/run-playwright] Received address:', address);
-
-    const filePath = await runPlaywright(address);
+    const filePath = await runPlaywright(letterData);
     console.log('[/run-playwright] PDF saved at:', filePath);
 
     const fileBuffer = fs.readFileSync(filePath);
@@ -44,8 +65,8 @@ app.post('/run-playwright', async (req, res) => {
   }
 });
 
-// Use the PORT Railway gives us (it was 8080 in your logs), default for local dev
 const PORT = Number(process.env.PORT) || 8080;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
