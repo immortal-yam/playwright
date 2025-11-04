@@ -67,6 +67,56 @@ app.post('/run-playwright', async (req, res) => {
   }
 });
 
+app.post('/run-playwright/file', async (req, res) => {
+  try {
+    const body = req.body || {};
+
+    const address = (body.address ?? '').toString().trim();
+    const city    = (body.city ?? '').toString().trim();
+    const state   = (body.state ?? '').toString().trim();
+    const zip     = (body.zip ?? '').toString().trim();
+    const amount  = (body.amount ?? '').toString().trim();
+
+    const missing = [];
+    if (!address) missing.push('address');
+    if (!city)    missing.push('city');
+    if (!state)   missing.push('state');
+    if (!zip)     missing.push('zip');
+    if (!amount)  missing.push('amount');
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        missing,
+      });
+    }
+
+    const letterData = { address, city, state, zip, amount };
+    console.log('[/run-playwright/file] Data:', letterData);
+
+    const filePath = await runPlaywright(letterData);
+    console.log('[/run-playwright/file] PDF at:', filePath);
+
+    const filename = path.basename(filePath);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"`
+    );
+
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', (err) => {
+      console.error('[/run-playwright/file] Stream error:', err);
+      res.status(500).end('Error reading file');
+    });
+    stream.pipe(res);
+  } catch (err) {
+    console.error('[/run-playwright/file] Error:', err);
+    res.status(500).json({ error: 'Playwright automation failed' });
+  }
+});
+
 const PORT = Number(process.env.PORT) || 8080;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
